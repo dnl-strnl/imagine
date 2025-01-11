@@ -1,0 +1,15 @@
+debug: true
+app_host: 127.0.0.1
+app_port: 5678
+
+model_host: null
+model_port: null
+model_name: null
+model_cert: false
+
+datadir: ${hydra:runtime.cwd}/data
+db_file: ${hydra:runtime.cwd}/data/images.db
+outputs: ${hydra:runtime.cwd}/outputs
+
+max_batch: 4
+num_inference_steps: 25
