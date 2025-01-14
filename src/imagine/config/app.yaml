@@ -12,4 +12,5 @@ db_file: ${hydra:runtime.cwd}/data/images.db
 outputs: ${hydra:runtime.cwd}/outputs
 
 max_batch: 4
-num_inference_steps: 25
+guidance_scale: 7.5
+num_inference_steps: 50
