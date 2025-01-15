@@ -1,240 +1,334 @@
-// State management.
-const state = {
-    isGenerating: false,
-    generatedImages: [],
-    sourceImage: null,
-    model: null
+// Constants
+const DEFAULT_SETTINGS = {
+    batchSize: 1,
+    seed: '',
+    guidanceScale: 7.5,
+    num_inference_steps: 50,
+    negativePrompt: ''
 };
 
-// DOM Elements.
-const elements = {
-    promptInput: document.getElementById('promptInput'),
-    generateBtn: document.getElementById('generateBtn'),
-    dropZone: document.getElementById('dropZone'),
-    fileInput: document.getElementById('fileInput'),
-    imageGrid: document.getElementById('imageGrid'),
-    loadingIndicator: document.getElementById('loadingIndicator'),
-    sourceImagePreview: document.createElement('div')
+const API_ENDPOINTS = {
+    UPLOAD: '/upload',
+    GENERATE: '/generate',
+    MODEL_INFO: '/model-info'
 };
 
-// Initialize source image preview.
-elements.sourceImagePreview.className = 'source-image-preview';
-elements.dropZone.appendChild(elements.sourceImagePreview);
+class ImageGenerator {
+    constructor() {
+        this.state = {
+            isGenerating: false,
+            generatedImages: [],
+            sourceImage: null,
+            model: null,
+            settings: this.initializeSettings()
+        };
 
-// Validate all elements are found.
-Object.entries(elements).forEach(([key, element]) => {
-    if (!element) {
-        console.error(`Element not found: ${key}`);
+        this.elements = this.initializeElements();
+        this.initializeApp();
     }
-});
 
-// Logging utility.
-const logger = {
-    info: (message, data) => {
-        console.log(`[INFO] ${message}`, data || '');
-        console.trace();
-    },
-    error: (message, error) => {
-        console.error(`[ERROR] ${message}`, error);
-        console.trace();
-    },
-    debug: (message, data) => {
-        console.debug(`[DEBUG] ${message}`, data || '');
+    initializeSettings() {
+        const batchSize = document.getElementById('batchSize')?.value;
+        const seedValue = document.getElementById('seedValue')?.value;
+
+        return {
+            ...DEFAULT_SETTINGS,
+            batchSize: batchSize ? parseInt(batchSize) : DEFAULT_SETTINGS.batchSize,
+            seed: seedValue ? parseInt(seedValue) : DEFAULT_SETTINGS.seed
+        };
     }
-};
 
-// Load saved images from server-side rendered data.
-function loadSavedImages() {
-    // Assumes the server is providing the `saved_images` data in a script tag.
-    if (typeof saved_images !== 'undefined') {
-        state.generatedImages = saved_images;
+    initializeElements() {
+        const elements = {
+            promptInput: document.getElementById('promptInput'),
+            generateBtn: document.getElementById('generateBtn'),
+            dropZone: document.getElementById('dropZone'),
+            fileInput: document.getElementById('fileInput'),
+            imageGrid: document.getElementById('imageGrid'),
+            loadingIndicator: document.getElementById('loadingIndicator'),
+            sourceImagePreview: document.createElement('div'),
+            batchSizeInput: document.getElementById('batchSize'),
+            seedInput: document.getElementById('seedValue')
+        };
 
-        const fragment = document.createDocumentFragment();
-        saved_images.forEach(image => {
-            const imageElement = createImageElement(image);
-            fragment.appendChild(imageElement);
+        // Validate elements
+        Object.entries(elements).forEach(([key, element]) => {
+            if (!element) {
+                console.error(`Required element not found: ${key}`);
+            }
         });
 
-        elements.imageGrid.appendChild(fragment);
-    }
-}
+        elements.sourceImagePreview.className = 'source-image-preview';
+        elements.dropZone.appendChild(elements.sourceImagePreview);
 
-function createImageElement(image) {
-    const imageElement = document.createElement('div');
-    imageElement.className = 'image-item';
-
-    const imgElement = document.createElement('img');
-    imgElement.src = image.url;
-    imgElement.alt = image.prompt || 'Generated image';
-
-    imageElement.addEventListener('click', () => {
-        const index = state.generatedImages.findIndex(img => img.url === image.url);
-        if (index !== -1) {
-            showImagePreview(index);
-        }
-    });
-
-    const promptElement = document.createElement('div');
-    promptElement.className = 'image-prompt';
-    promptElement.textContent = image.prompt || '';
-
-    imageElement.appendChild(imgElement);
-    imageElement.appendChild(promptElement);
-    return imageElement;
-}
-
-async function generateImages() {
-    if (state.isGenerating) {
-        console.debug('Generation already in progress...');
-        return;
+        return elements;
     }
 
-    const prompt = elements.promptInput.value.trim();
-    const batchSize = Math.max(1, Math.min(4,
-        parseInt(document.getElementById('batchSize').value) || 1)
-    );
-    const seedValue = document.getElementById('seedValue').value;
-
-    if (!prompt) {
-        alert('Please enter a prompt!');
-        return;
+    initializeApp() {
+        this.initializeSettingsPanel();
+        this.setupEventListeners();
+        this.loadSavedImages();
+        this.fetchModelInfo();
     }
 
-    try {
-        state.isGenerating = true;
-        elements.loadingIndicator.style.display = 'block';
+    initializeSettingsPanel() {
+        const settingsPanelRoot = document.getElementById('settingsPanelRoot');
+        if (!settingsPanelRoot) return;
 
-        const response = await fetch('/generate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                prompt: prompt,
-                batch_size: batchSize,
-                seed: parseInt(seedValue),
-                model: state.model,
-                image: state.sourceImage
+        ReactDOM.createRoot(settingsPanelRoot).render(
+            React.createElement(SettingsPanel, {
+                initialSettings: this.state.settings,
+                onSettingsChange: this.handleSettingsChange.bind(this)
             })
+        );
+    }
+
+    handleSettingsChange(newSettings) {
+        this.state.settings = {
+            ...this.state.settings,
+            ...newSettings
+        };
+    }
+
+    setupEventListeners() {
+        // Generate button events.
+        this.elements.generateBtn.addEventListener('click', this.handleGenerate.bind(this));
+        this.elements.promptInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.handleGenerate();
+            }
         });
 
-        const data = await response.json();
+        // Batch size input.
+        this.elements.batchSizeInput?.addEventListener('change', (e) => {
+            const value = Math.max(1, Math.min(4, parseInt(e.target.value) || 1));
+            e.target.value = value;
+            this.handleSettingsChange({ batchSize: value });
+        });
 
-        if (data.success) {
-            const fragment = document.createDocumentFragment();
+        // Seed input.
+        this.elements.seedInput?.addEventListener('change', (e) => {
+            const value = parseInt(e.target.value) || '';
+            this.handleSettingsChange({ seed: value });
+        });
 
-            data.images.forEach(image => {
-                const imageWithModel = {
-                    ...image,
-                    model: state.model
-                };
-                state.generatedImages.unshift(imageWithModel);
-                const imageElement = createImageElement(imageWithModel);
-                fragment.appendChild(imageElement);
+        this.setupFileUploadListeners();
+    }
+
+    setupFileUploadListeners() {
+        const { dropZone, fileInput } = this.elements;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) this.handleImageUpload(file);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) this.handleImageUpload(file);
+        });
+    }
+
+    async handleImageUpload(file) {
+        this.showLoading(true);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch(API_ENDPOINTS.UPLOAD, {
+                method: 'POST',
+                body: formData
             });
 
-            elements.imageGrid.insertBefore(fragment, elements.imageGrid.firstChild);
-        } else {
-            throw new Error(data.error);
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Upload failed');
+            }
+
+            this.state.sourceImage = data.filename;
+            this.updateSourceImagePreview(file);
+        } catch (error) {
+            console.error('Upload error:', error);
+            this.clearSourceImage();
+            alert('Failed to upload image: ' + error.message);
+        } finally {
+            this.showLoading(false);
         }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Failed to generate images: ' + error.message);
-    } finally {
-        state.isGenerating = false;
-        elements.loadingIndicator.style.display = 'none';
     }
-}
 
-async function handleImageUpload(file) {
-    logger.debug('Handling image upload:', file.name);
-    elements.loadingIndicator.style.display = 'block';
+    updateSourceImagePreview(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.elements.sourceImagePreview.innerHTML = `
+                <div class="preview-container">
+                    <img src="${e.target.result}" alt="Source image">
+                    <button class="remove-btn" onclick="app.clearSourceImage()">×</button>
+                </div>
+            `;
+            this.elements.dropZone.classList.add('has-image');
+        };
+        reader.readAsDataURL(file);
+    }
 
-    try {
-        const formData = new FormData();
-        formData.append('file', file);
+    clearSourceImage() {
+        this.state.sourceImage = null;
+        this.elements.sourceImagePreview.innerHTML = '';
+        this.elements.dropZone.classList.remove('has-image');
+        this.elements.fileInput.value = '';
+    }
 
-        const response = await fetch('/upload', {
-            method: 'POST',
-            body: formData
+    async handleGenerate() {
+        if (this.state.isGenerating) {
+            console.debug('Generation in progress...');
+            return;
+        }
+
+        const prompt = this.elements.promptInput.value.trim();
+        if (!prompt) {
+            alert('Please enter a prompt!');
+            return;
+        }
+
+        try {
+            this.state.isGenerating = true;
+            this.showLoading(true);
+            this.elements.generateBtn.disabled = true;
+
+            const response = await fetch(API_ENDPOINTS.GENERATE, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prompt,
+                    batch_size: this.state.settings.batchSize,
+                    seed: this.state.settings.seed || undefined,
+                    guidance_scale: this.state.settings.guidanceScale,
+                    num_inference_steps: this.state.settings.num_inference_steps,
+                    negative_prompt: this.state.settings.negativePrompt,
+                    model: this.state.model,
+                    image: this.state.sourceImage
+                })
+            });
+
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Generation failed');
+            }
+
+            this.addGeneratedImages(data.images);
+        } catch (error) {
+            console.error('Generation error:', error);
+            alert('Failed to generate images: ' + error.message);
+        } finally {
+            this.state.isGenerating = false;
+            this.showLoading(false);
+            this.elements.generateBtn.disabled = false;
+        }
+    }
+
+    addGeneratedImages(images) {
+        const fragment = document.createDocumentFragment();
+
+        images.forEach(image => {
+            const imageWithMetadata = {
+                ...image,
+                model: this.state.model,
+                settings: { ...this.state.settings }
+            };
+
+            this.state.generatedImages.push(imageWithMetadata);
+            fragment.appendChild(this.createImageElement(imageWithMetadata));
         });
 
-        const data = await response.json();
-        logger.debug('Upload response:', data);
-
-        if (data.success) {
-            logger.info('Image uploaded successfully:', data.filename);
-            state.sourceImage = data.filename;
-            updateSourceImagePreview(file);
-        } else {
-            throw new Error(data.error || 'Upload failed.');
-        }
-    } catch (error) {
-        logger.error('Error uploading image:', error);
-        clearSourceImage();
-    } finally {
-        elements.loadingIndicator.style.display = 'none';
-    }
-}
-
-function updateSourceImagePreview(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        elements.sourceImagePreview.innerHTML = `
-            <div class="preview-container">
-                <img src="${e.target.result}" alt="Source image">
-                <button class="remove-btn" onclick="clearSourceImage()">×</button>
-            </div>
-        `;
-        elements.dropZone.classList.add('has-image');
-    };
-    reader.readAsDataURL(file);
-}
-
-function clearSourceImage() {
-    state.sourceImage = null;
-    elements.sourceImagePreview.innerHTML = '';
-    elements.dropZone.classList.remove('has-image');
-    elements.fileInput.value = '';
-}
-
-function showImagePreview(index) {
-    if (!state.generatedImages || !state.generatedImages[index]) {
-        logger.error('Invalid image index.');
-        return;
+        this.elements.imageGrid.insertBefore(fragment, this.elements.imageGrid.firstChild);
     }
 
-    const modalRoot = document.getElementById('previewModalRoot');
-    if (!modalRoot) return;
+    createImageElement(image) {
+        const imageElement = document.createElement('div');
+        imageElement.className = 'image-item';
 
-    const root = ReactDOM.createRoot(modalRoot);
-    root.render(
-        React.createElement(ImagePreviewModal, {
-            images: state.generatedImages,
-            initialIndex: index,
-            onClose: () => {
-                root.unmount();
+        const imgElement = document.createElement('img');
+        imgElement.src = image.url;
+        imgElement.alt = image.prompt || 'Generated image';
+
+        const promptElement = document.createElement('div');
+        promptElement.className = 'image-prompt';
+        promptElement.textContent = image.prompt || '';
+
+        imageElement.appendChild(imgElement);
+        imageElement.appendChild(promptElement);
+
+        imageElement.addEventListener('click', () => {
+            const index = this.state.generatedImages.findIndex(img => img.url === image.url);
+            if (index !== -1) {
+                this.showImagePreview(index);
             }
-        })
-    );
-}
+        });
 
-async function fetchModelInfo() {
-    try {
-        const response = await fetch('/model-info');
-        const data = await response.json();
-        state.model = data.model;
-    } catch (error) {
-        logger.error('Error fetching model info:', error);
+        return imageElement;
+    }
+
+    showImagePreview(index) {
+        if (!this.state.generatedImages?.[index]) return;
+
+        const modalRoot = document.getElementById('previewModalRoot');
+        if (!modalRoot) return;
+
+        ReactDOM.createRoot(modalRoot).render(
+            React.createElement(ImagePreviewModal, {
+                images: this.state.generatedImages,
+                initialIndex: index,
+                onClose: () => {
+                    ReactDOM.createRoot(modalRoot).unmount();
+                }
+            })
+        );
+    }
+
+    async fetchModelInfo() {
+        try {
+            const response = await fetch(API_ENDPOINTS.MODEL_INFO);
+            const data = await response.json();
+            this.state.model = data.model;
+        } catch (error) {
+            console.error('Error fetching model info:', error);
+        }
+    }
+
+    loadSavedImages() {
+        if (typeof saved_images === 'undefined') return;
+
+        this.state.generatedImages = saved_images;
+        const fragment = document.createDocumentFragment();
+
+        saved_images.forEach(image => {
+            fragment.appendChild(this.createImageElement(image));
+        });
+
+        this.elements.imageGrid.appendChild(fragment);
+    }
+
+    showLoading(show) {
+        this.elements.loadingIndicator.style.display = show ? 'block' : 'none';
     }
 }
 
+// Initialize app when DOM is ready...
 document.addEventListener('DOMContentLoaded', () => {
-    loadSavedImages();
-    fetchModelInfo();
-    const generateBtn = document.getElementById('generateBtn');
-    generateBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        generateImages();
-    });
+    window.app = new ImageGenerator();
 });

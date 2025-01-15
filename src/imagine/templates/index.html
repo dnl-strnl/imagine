@@ -2,10 +2,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>T2I Generator</title>
+    <title>Imagine</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         :root {
             --success: #4CAF50;
@@ -194,6 +194,74 @@
             opacity: 1;
         }
 
+        .settings-panel {
+            background: var(--surface);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 4px var(--shadow);
+            overflow: hidden;
+        }
+
+        .settings-toggle {
+            width: 100%;
+            padding: 8px 10px;
+            background: none;
+            border: none;
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .settings-toggle:hover {
+            background: var(--hover);
+        }
+
+        .toggle-icon {
+            transition: transform 0.2s;
+        }
+
+        .toggle-icon.expanded {
+            transform: rotate(180deg);
+        }
+
+        .settings-content {
+            padding: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .setting-item {
+            margin-bottom: 10px;
+        }
+
+        .setting-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-item label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .setting-item input {
+            width: 100%;
+            padding: 8px;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        .setting-item input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
     </style>
   </head>
   <body>
@@ -211,6 +279,7 @@
                   </div>
                   <button class="generate-btn" id="generateBtn">Generate</button>
               </div>
+              <div id="settingsPanelRoot"></div>
               <div class="drop-zone" id="dropZone">
                   <p>Image Prompt</p>
                   <input type="file" id="fileInput" style="display: none" accept="image/*">
@@ -220,6 +289,7 @@
           </div>
       </div>
       <div id="previewModalRoot"></div>
+      <script src="/static/js/components/SettingsPanel.js"></script>
       <script src="/static/js/components/ImagePreviewModal.js"></script>
       <script src="/static/js/app.js"></script>
       <script>

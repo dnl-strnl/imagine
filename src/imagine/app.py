@@ -54,39 +54,65 @@ def make_app(cfg):
     def generate_batch():
         try:
             data = request.get_json()
-            prompt = data.get('prompt', '')
+
             seed = data.get('seed', 0)
+            prompt = data.get('prompt', '')
+            negative_prompt = data.get('negative_prompt', '')
+
+            image_path = data.get('image', None)
+            image = None
+            if image_path:
+                source_image = Path(app.config['UPLOADS'] / image_path)
+                if source_image.exists():
+                    img = Image.open(source_image)
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="PNG")
+                    image = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
             batch = min(int(data.get('batch_size', 1)), cfg.max_batch)
-            image_path = data.get('image')
+            verify = cfg.model_cert
+
+            num_inference_steps = data.get('num_inference_steps', cfg.num_inference_steps)
+            guidance_scale = data.get('guidance_scale', cfg.guidance_scale)
 
             if not prompt and not image_path:
                 return jsonify(dict(error='No inputs provided.')), 400
 
-            json_data = dict(prompt=prompt, seed=seed, batch=batch)
+            base_args = dict(seed=seed, batch=batch)
+            pipe_args = dict(
+                prompt=prompt,
+                image=image,
+                negative_prompt=negative_prompt,
+                num_inference_steps=num_inference_steps,
+                guidance_scale=guidance_scale,
+            )
 
-            output = requests.post(model_url, verify=cfg.model_cert, json=json_data)
+            json_data = dict(**base_args, **pipe_args)
+            log.info(json_data)
+
+            output = requests.post(model_url, verify=verify, json=json_data)
 
             result = json.loads(output.content)
             output = json.loads(result['body'])
 
             image_metadata = []
             for idx, imbytes in enumerate(output['images'][:batch]):
-                filestem = f'{prompt}_{seed}' + (f'_{idx}' if idx else '')
+
+                extras = f'{str(guidance_scale).zfill(4)}_{str(num_inference_steps).zfill(3)}'
+                filestem = f'{prompt}_{seed}_{extras}' + (f'_{idx}' if idx else '')
                 filename = f"{secure_filename(filestem)}.png"
                 filepath = app.config['GENERATED'] / filename
                 url = f'/generated/{filename}'
-
+                file_data = dict(
+                    filename=filename,
+                    filepath=str(filepath),
+                    source_image=image_path,
+                    url=url,
+                )
                 pil = Image.open(io.BytesIO(base64.b64decode(imbytes)))
                 pil.save(filepath)
 
-                image_data = dict(
-                    filename=filename,
-                    filepath=str(filepath),
-                    url=url,
-                    prompt=prompt,
-                    seed=seed,
-                    source_image=image_path
-                )
+                image_data = dict(**file_data, **json_data)
 
                 app.config['DATABASE'].save_image(image_data)
                 image_metadata.append(image_data)

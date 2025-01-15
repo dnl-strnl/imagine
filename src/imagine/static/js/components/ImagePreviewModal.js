@@ -5,6 +5,7 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
         console.error('Invalid images or index');
         return null;
     }
+
     const currentImage = images[currentIndex];
 
     React.useEffect(() => {
@@ -133,6 +134,14 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
         wordBreak: 'break-word'
     };
 
+    const settingsGridStyle = {
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        gap: '0.5rem',
+        fontSize: '0.875rem',
+        color: 'rgba(255, 255, 255, 0.8)'
+    };
+
     return React.createElement('div', { style: containerStyle },
         React.createElement('div', { style: contentStyle },
             React.createElement('div', { style: imageContainerStyle },
@@ -175,27 +184,59 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
                         marginBottom: '0.5rem'
                     }
                 }, 'Image Details'),
-                React.createElement('div', { style: detailsContainerStyle },
-                    React.createElement('div', { style: detailItemStyle },
+                React.createElement('div', { style: detailsContainerStyle }, [
+                    // Basic Details
+                    React.createElement('div', { style: detailItemStyle, key: 'model' },
                         React.createElement('span', { style: labelStyle }, 'Model'),
                         React.createElement('span', { style: valueStyle }, currentImage.model)
                     ),
-                    React.createElement('div', { style: detailItemStyle },
-                        React.createElement('span', { style: labelStyle }, 'Filename'),
-                        React.createElement('span', { style: valueStyle }, currentImage.filename)
-                    ),
-                    React.createElement('div', { style: detailItemStyle },
-                        React.createElement('span', { style: labelStyle }, 'Prompt'),
-                        React.createElement('span', { style: valueStyle }, currentImage.prompt || 'No prompt provided')
-                    ),
-                    React.createElement('div', { style: detailItemStyle },
+                    React.createElement('div', { style: detailItemStyle, key: 'seed' },
                         React.createElement('span', { style: labelStyle }, 'Seed'),
                         React.createElement('span', { style: valueStyle },
                             currentImage.seed !== undefined && currentImage.seed !== null
                                 ? currentImage.seed
                                 : 'Not specified'
-                        )                    )
-                ),
+                        )
+                    ),
+                    //React.createElement('div', { style: detailItemStyle, key: 'filename' },
+                    //    React.createElement('span', { style: labelStyle }, 'Filename'),
+                    //    React.createElement('span', { style: valueStyle }, currentImage.filename)
+                    //),
+                    React.createElement('div', { style: detailItemStyle, key: 'prompt' },
+                        React.createElement('span', { style: labelStyle }, 'Prompt'),
+                        React.createElement('span', { style: valueStyle }, currentImage.prompt || 'No prompt provided')
+                    ),
+                    currentImage.settings && React.createElement('div', {
+                        style: {
+                            ...detailItemStyle,
+                            marginTop: '1rem',
+                            paddingTop: '1rem',
+                            borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+                        },
+                        key: 'settings'
+                    },
+                        React.createElement('div', { style: settingsGridStyle },
+                            React.createElement('span', null, 'Guidance Scale:'),
+                            React.createElement('span', null, currentImage.settings.guidanceScale),
+                            React.createElement('span', null, 'Inference Steps:'),
+                            React.createElement('span', null, currentImage.settings.num_inference_steps),
+                            currentImage.settings.negativePrompt && [
+                                React.createElement('span', {
+                                    key: 'neg-prompt-label',
+                                    style: { gridColumn: '1 / -1' }
+                                }, 'Negative Prompt:'),
+                                React.createElement('span', {
+                                    key: 'neg-prompt-value',
+                                    style: {
+                                        gridColumn: '1 / -1',
+                                        color: 'rgba(255, 255, 255, 0.6)',
+                                        fontStyle: 'italic'
+                                    }
+                                }, currentImage.settings.negativePrompt)
+                            ]
+                        )
+                    )
+                ]),
                 React.createElement('div', {
                     style: {
                         color: 'rgba(255, 255, 255, 0.6)',
