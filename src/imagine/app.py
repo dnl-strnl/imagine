@@ -18,19 +18,21 @@ from werkzeug.utils import secure_filename
 from imagine.database import ImageDatabase
 
 def make_app(cfg):
-    model_url = f"{cfg.model_host}:{cfg.model_port}/predictions/{cfg.model_name}"
-    log.info(f"{model_url}")
-
     app = Flask(__name__)
 
     app.config['DATABASE'] = ImageDatabase(cfg.db_file)
     app.config['GENERATED'] = Path(cfg.outputs) / 'generated'
     app.config['UPLOADS'] = Path(cfg.datadir) / 'uploads'
-
     app.config['GENERATED'].mkdir(parents=True, exist_ok=True)
     app.config['UPLOADS'].mkdir(parents=True, exist_ok=True)
+    app.config['MODEL'] = default_model = cfg.model_name
 
-    app.config['MODEL'] = cfg.model_name
+    max_steps = cfg.num_inference_steps
+    default_image_width = cfg.default_image_width
+    default_image_height = cfg.default_image_height
+
+    model_url = lambda model_name: \
+        f"{cfg.model_host}:{cfg.model_port}/predictions/{model_name}"
 
     @app.route('/model-info', methods=['GET'])
     def get_model_info():
@@ -55,11 +57,25 @@ def make_app(cfg):
         try:
             data = request.get_json()
 
-            seed = data.get('seed', 0)
             prompt = data.get('prompt', '')
-            negative_prompt = data.get('negative_prompt', '')
-
             image_path = data.get('image', None)
+
+            if not prompt and not image_path:
+                return jsonify(dict(error='No inputs provided.')), 400
+
+            app.config['MODEL'] = data.get('model', default_model)
+
+            payload = dict(
+                prompt=prompt,
+                seed=int(data.get('seed', 0)),
+                batch=min(int(data.get('batch_size', 1)), cfg.max_batch),
+                negative_prompt=data.get('negative_prompt', ''),
+                width=int(data.get('width', default_image_width)),
+                height=int(data.get('height', default_image_height)),
+                guidance_scale=float(data.get('guidance_scale', cfg.guidance_scale)),
+                num_inference_steps=int(data.get('num_inference_steps', max_steps)),
+            )
+
             image = None
             if image_path:
                 source_image = Path(app.config['UPLOADS'] / image_path)
@@ -69,53 +85,37 @@ def make_app(cfg):
                     img.save(buffer, format="PNG")
                     image = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-            batch = min(int(data.get('batch_size', 1)), cfg.max_batch)
-            verify = cfg.model_cert
+            api_payload = dict(image=image, **payload)
 
-            num_inference_steps = data.get('num_inference_steps', cfg.num_inference_steps)
-            guidance_scale = data.get('guidance_scale', cfg.guidance_scale)
-
-            if not prompt and not image_path:
-                return jsonify(dict(error='No inputs provided.')), 400
-
-            base_args = dict(seed=seed, batch=batch)
-            pipe_args = dict(
-                prompt=prompt,
-                image=image,
-                negative_prompt=negative_prompt,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
+            db_payload = dict(
+                model=app.config['MODEL'], source_image=image_path, **payload
             )
 
-            json_data = dict(**base_args, **pipe_args)
-            log.info(json_data)
-
-            output = requests.post(model_url, verify=verify, json=json_data)
-
+            url = model_url(model := app.config['MODEL'])
+            output = requests.post(url, json=api_payload, verify=cfg.model_cert)
             result = json.loads(output.content)
             output = json.loads(result['body'])
 
             image_metadata = []
-            for idx, imbytes in enumerate(output['images'][:batch]):
-
-                extras = f'{str(guidance_scale).zfill(4)}_{str(num_inference_steps).zfill(3)}'
-                filestem = f'{prompt}_{seed}_{extras}' + (f'_{idx}' if idx else '')
+            for idx, image_bytes in enumerate(output['images']):
+                filestem = db_payload['prompt'] + f'_{str(uuid.uuid4())[:8]}'
                 filename = f"{secure_filename(filestem)}.png"
-                filepath = app.config['GENERATED'] / filename
+                filepath = str(app.config['GENERATED'] / filename)
                 url = f'/generated/{filename}'
-                file_data = dict(
-                    filename=filename,
-                    filepath=str(filepath),
-                    source_image=image_path,
-                    url=url,
-                )
-                pil = Image.open(io.BytesIO(base64.b64decode(imbytes)))
-                pil.save(filepath)
 
-                image_data = dict(**file_data, **json_data)
+                image_data = {
+                    'filename': filename,
+                    'filepath': filepath,
+                    'url': url,
+                    'settings': db_payload,
+                    **db_payload
+                }
+                image_metadata.append(image_data)
+
+                image = Image.open(io.BytesIO(base64.b64decode(image_bytes)))
+                image.save(filepath)
 
                 app.config['DATABASE'].save_image(image_data)
-                image_metadata.append(image_data)
 
             return jsonify(dict(success=True, images=image_metadata))
         except Exception as image_generation_exception:
@@ -134,8 +134,7 @@ def make_app(cfg):
         if file:
             unique_id  = str(uuid.uuid4()) + splitext(file.filename)[1]
             filename = secure_filename(unique_id)
-            filepath = join(app.config['UPLOADS'], filename)
-            file.save(filepath)
+            file.save(join(app.config['UPLOADS'], filename))
             return jsonify(dict(filename=filename, success=True))
 
     return app
