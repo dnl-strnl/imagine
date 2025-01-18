@@ -8,7 +8,7 @@ class ImageDatabase:
         self._init_db()
 
     def _init_db(self):
-        """Initialize the database with proper schema including seed."""
+        """Initialize the database with proper schema."""
         with sqlite3.connect(self.db_file) as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS images (
@@ -19,30 +19,45 @@ class ImageDatabase:
                     prompt TEXT,
                     seed INTEGER,
                     source_image TEXT,
+                    model TEXT,
+                    guidance_scale REAL,
+                    num_inference_steps INTEGER,
+                    negative_prompt TEXT,
+                    width INTEGER,
+                    height INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             conn.commit()
 
     def save_image(self, image_data):
-        """Save image metadata including seed to database."""
+        """Save image metadata to database."""
         with sqlite3.connect(self.db_file) as conn:
             conn.execute('''
-                INSERT INTO images
-                (filename, filepath, url, prompt, seed, source_image)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO images (
+                    filename, filepath, url, prompt, seed, source_image,
+                    model, guidance_scale, num_inference_steps, negative_prompt,
+                    width, height
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 image_data['filename'],
                 image_data['filepath'],
                 image_data['url'],
                 image_data['prompt'],
-                image_data['seed'],  # Make sure seed is included
-                image_data['source_image']
+                image_data['seed'],
+                image_data.get('source_image'),
+                image_data.get('model'),
+                image_data.get('guidance_scale'),
+                image_data.get('num_inference_steps'),
+                image_data.get('negative_prompt'),
+                image_data.get('width'),
+                image_data.get('height')
             ))
             conn.commit()
 
     def get_all_images(self):
-        """Retrieve all images with their metadata including seed."""
+        """Retrieve all images with their metadata."""
         with sqlite3.connect(self.db_file) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute('''
@@ -55,11 +70,21 @@ class ImageDatabase:
                 'url': row['url'],
                 'prompt': row['prompt'],
                 'seed': row['seed'],
-                'source_image': row['source_image']
+                'source_image': row['source_image'],
+                'model': row['model'],
+                'width': row['width'],
+                'height': row['height'],
+                'settings': {
+                    'guidanceScale': row['guidance_scale'],
+                    'num_inference_steps': row['num_inference_steps'],
+                    'negativePrompt': row['negative_prompt'],
+                    'width': row['width'],
+                    'height': row['height']
+                }
             } for row in cursor.fetchall()]
 
     def verify_images(self, generated_dir):
-        """Verify all images exist and clean up database if they don't."""
+        """Verify all images exist and clean database."""
         with sqlite3.connect(self.db_file) as conn:
             cursor = conn.execute('SELECT id, filepath FROM images')
             for row in cursor:

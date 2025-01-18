@@ -2,9 +2,11 @@
 const DEFAULT_SETTINGS = {
     batchSize: 1,
     seed: '',
-    guidanceScale: 7.5,
+    guidanceScale: 5,
     num_inference_steps: 50,
-    negativePrompt: ''
+    negativePrompt: '',
+    height: 1024,
+    width: 1024,
 };
 
 const API_ENDPOINTS = {
@@ -14,28 +16,31 @@ const API_ENDPOINTS = {
 };
 
 class ImageGenerator {
-    constructor() {
+      constructor() {
+        this.elements = this.initializeElements();
+
         this.state = {
             isGenerating: false,
             generatedImages: [],
             sourceImage: null,
-            model: null,
-            settings: this.initializeSettings()
+            settings: {
+                ...DEFAULT_SETTINGS,
+                batchSize: this.getBatchSizeFromDOM(),
+                seed: this.getSeedFromDOM()
+            }
         };
 
-        this.elements = this.initializeElements();
         this.initializeApp();
     }
 
-    initializeSettings() {
+    getBatchSizeFromDOM() {
         const batchSize = document.getElementById('batchSize')?.value;
-        const seedValue = document.getElementById('seedValue')?.value;
+        return batchSize ? parseInt(batchSize) : DEFAULT_SETTINGS.batchSize;
+    }
 
-        return {
-            ...DEFAULT_SETTINGS,
-            batchSize: batchSize ? parseInt(batchSize) : DEFAULT_SETTINGS.batchSize,
-            seed: seedValue ? parseInt(seedValue) : DEFAULT_SETTINGS.seed
-        };
+    getSeedFromDOM() {
+        const seedValue = document.getElementById('seedValue')?.value;
+        return seedValue ? parseInt(seedValue) : DEFAULT_SETTINGS.seed;
     }
 
     initializeElements() {
@@ -51,7 +56,6 @@ class ImageGenerator {
             seedInput: document.getElementById('seedValue')
         };
 
-        // Validate elements
         Object.entries(elements).forEach(([key, element]) => {
             if (!element) {
                 console.error(`Required element not found: ${key}`);
@@ -60,34 +64,40 @@ class ImageGenerator {
 
         elements.sourceImagePreview.className = 'source-image-preview';
         elements.dropZone.appendChild(elements.sourceImagePreview);
-
         return elements;
     }
 
-    initializeApp() {
+    async initializeApp() {
+        await this.fetchModelInfo();
         this.initializeSettingsPanel();
         this.setupEventListeners();
         this.loadSavedImages();
-        this.fetchModelInfo();
-    }
-
-    initializeSettingsPanel() {
-        const settingsPanelRoot = document.getElementById('settingsPanelRoot');
-        if (!settingsPanelRoot) return;
-
-        ReactDOM.createRoot(settingsPanelRoot).render(
-            React.createElement(SettingsPanel, {
-                initialSettings: this.state.settings,
-                onSettingsChange: this.handleSettingsChange.bind(this)
-            })
-        );
     }
 
     handleSettingsChange(newSettings) {
+        const parsedSettings = { ...newSettings };
+
+        if ('width' in newSettings) {
+            parsedSettings.width = parseInt(newSettings.width) || 1024;
+        }
+        if ('height' in newSettings) {
+            parsedSettings.height = parseInt(newSettings.height) || 1024;
+        }
+        if ('num_inference_steps' in newSettings) {
+            parsedSettings.num_inference_steps = parseInt(newSettings.num_inference_steps) || 50;
+        }
+        if ('guidanceScale' in newSettings) {
+            parsedSettings.guidanceScale = parseFloat(newSettings.guidanceScale) || 7.5;
+        }
+
         this.state.settings = {
             ...this.state.settings,
-            ...newSettings
+            ...parsedSettings
         };
+
+        if (newSettings.model !== undefined) {
+            this.state.model = newSettings.model;
+        }
     }
 
     setupEventListeners() {
@@ -213,14 +223,16 @@ class ImageGenerator {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    prompt,
-                    batch_size: this.state.settings.batchSize,
-                    seed: this.state.settings.seed || undefined,
-                    guidance_scale: this.state.settings.guidanceScale,
-                    num_inference_steps: this.state.settings.num_inference_steps,
-                    negative_prompt: this.state.settings.negativePrompt,
-                    model: this.state.model,
-                    image: this.state.sourceImage
+                  prompt,
+                  batch_size: this.state.settings.batchSize,
+                  seed: this.state.settings.seed || undefined,
+                  guidance_scale: this.state.settings.guidanceScale,
+                  num_inference_steps: this.state.settings.num_inference_steps,
+                  negative_prompt: this.state.settings.negativePrompt,
+                  model: this.state.model,
+                  height: this.state.settings.height,
+                  width: this.state.settings.width,
+                  image: this.state.sourceImage
                 })
             });
 
@@ -304,10 +316,45 @@ class ImageGenerator {
         try {
             const response = await fetch(API_ENDPOINTS.MODEL_INFO);
             const data = await response.json();
+
             this.state.model = data.model;
+            this.state.settings = {
+                ...this.state.settings,
+                model: data.model
+            };
+
+            return data;
         } catch (error) {
             console.error('Error fetching model info:', error);
+            throw error;
         }
+    }
+
+    initializeSettings() {
+        const batchSize = document.getElementById('batchSize')?.value;
+        const seedValue = document.getElementById('seedValue')?.value;
+
+        return {
+            ...DEFAULT_SETTINGS,
+            batchSize: batchSize ? parseInt(batchSize) : DEFAULT_SETTINGS.batchSize,
+            seed: seedValue ? parseInt(seedValue) : DEFAULT_SETTINGS.seed,
+            model: this.state.model || DEFAULT_SETTINGS.model,
+        };
+    }
+
+    initializeSettingsPanel() {
+        const settingsPanelRoot = document.getElementById('settingsPanelRoot');
+        if (!settingsPanelRoot) return;
+
+        ReactDOM.createRoot(settingsPanelRoot).render(
+            React.createElement(SettingsPanel, {
+                initialSettings: {
+                    ...this.state.settings,
+                    model: this.state.model
+                },
+                onSettingsChange: this.handleSettingsChange.bind(this)
+            })
+        );
     }
 
     loadSavedImages() {

@@ -1,4 +1,5 @@
 debug: true
+
 app_host: 127.0.0.1
 app_port: 5678
 
@@ -12,5 +13,9 @@ db_file: ${hydra:runtime.cwd}/data/images.db
 outputs: ${hydra:runtime.cwd}/outputs
 
 max_batch: 4
-guidance_scale: 7.5
-num_inference_steps: 50
+
+default_image_width: 1024
+default_image_height: 1024
+num_inference_steps: 100
+guidance_scale: 5.0
+negative_prompt: dull, incoherent, ai generated, low quality, bad composition, poorly drawn, incorrect anatomy
