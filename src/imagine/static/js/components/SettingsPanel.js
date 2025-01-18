@@ -70,7 +70,7 @@ const SettingsPanel = ({ initialSettings = {}, onSettingsChange }) => {
           type: 'text',
           value: settings.model,
           onChange: (e) => handleSettingChange('model', e.target.value),
-          placeholder: 'Enter model name'
+          placeholder: 'Model Name'
         })
       ]),
 
