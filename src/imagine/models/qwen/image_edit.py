@@ -16,7 +16,7 @@ class API(litserve.LitAPI):
         super().__init__()
         self.bnb_config = instantiate(
             cfg.quantization,
-            bnb_4bit_compute_dtype = self.torch_dtype := = torch.bfloat16
+            bnb_4bit_compute_dtype = self.torch_dtype := torch.bfloat16
         )
         self.setup_logging(f"{__file__}.log")
 
