@@ -14,9 +14,9 @@ from typing import Any, Dict
 class API(litserve.LitAPI):
     def __init__(self, cfg):
         super().__init__()
+        self.torch_dtype = torch.bfloat16
         self.bnb_config = instantiate(
-            cfg.quantization,
-            bnb_4bit_compute_dtype = self.torch_dtype := torch.bfloat16
+            cfg.quantization, bnb_4bit_compute_dtype = self.torch_dtype
         )
         self.setup_logging(f"{__file__}.log")
 
