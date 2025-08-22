@@ -63,13 +63,13 @@ class API(litserve.LitAPI):
             self.logger.info(f"VRAM: {allocated=:.1f} MB, {reserved=:.1f} MB")
 
     def decode_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        json_data = request if not 'body' in request else request['body']
+        json_data = request if not "body" in request else request["body"]
 
         image = None
-        image_base64 = json_data.pop('image', None)
+        image_base64 = json_data.pop("image", None)
         if image_base64 is not None:
             image_bytes = io.BytesIO(base64.b64decode(image_base64))
-            image = Image.open(image_bytes).convert('RGB')
+            image = Image.open(image_bytes).convert("RGB")
 
         return dict(image=image, **json_data)
 
@@ -83,19 +83,19 @@ class API(litserve.LitAPI):
         image_edit = predictions.images[0]
 
         buffer = io.BytesIO()
-        image_edit.save(buffer, format='PNG')
-        base64_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        image_edit.save(buffer, format="PNG")
+        base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         return dict(image=base64_mage, prompt=prompt, seed=seed)
 
-@hydra.main(config_path='config/models/qwen', config_name='image_edit', version_base=None)
+@hydra.main(config_path="config", config_name="image_edit", version_base=None)
 def main(cfg: DictConfig):
     logging.info(OmegaConf.to_yaml(cfg))
     try:
         server = instantiate(cfg.server, lit_api=API(cfg.model))
         server.run(host=cfg.host, port=cfg.port)
     except Exception as model_exception:
-        logging.error(f'{model_exception=}')
+        logging.error(f"{model_exception=}")
         raise
     except KeyboardInterrupt:
         pass
