@@ -1,0 +1,15 @@
+host: 0.0.0.0
+port: 44773
+
+server:
+  _target_: litserve.LitServer
+  timeout: 500
+
+model:
+  quantization:
+    _target_: transformers.BitsAndBytesConfig
+    load_in_4bit: true
+    bnb_4bit_quant_type: nf4
+    bnb_4bit_use_double_quant: true
+    llm_int8_skip_modules:
+      - transformer_blocks.0.img_mod
