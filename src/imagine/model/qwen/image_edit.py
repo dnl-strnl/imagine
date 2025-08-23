@@ -1,4 +1,5 @@
 import base64
+from diffusers import QwenImageEditPipeline, QwenImageTransformer2DModel
 import hydra
 from hydra.utils import instantiate
 import io
@@ -8,7 +9,6 @@ from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 import torch
 from transformers import BitsAndBytesConfig, Qwen2_5_VLForConditionalGeneration
-from diffusers import QwenImageEditPipeline, QwenImageTransformer2DModel
 from typing import Any, Dict
 
 class API(litserve.LitAPI):
