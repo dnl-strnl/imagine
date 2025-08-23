@@ -131,7 +131,7 @@ class Client:
             console=console
         ) as progress:
 
-            task = progress.add_task('Imagining', total=self.estimate_wait)
+            task = progress.add_task('Imagining', total=self.estimated_wait)
             start_time = time.time()
 
             # update progress while the thread is running...
@@ -196,7 +196,7 @@ def main(cfg: DictConfig):
                 image_id = image_file.stem
                 input_prompt = prompts.get(input_file, None)
 
-                console.print(f'\n[bold]Imagining 🧠✨🎨 {i+1}/{len(image_files)}: {image_file.name}[/bold]')
+                console.print(f'\n[bold]{i+1}/{len(image_files)}: {image_file.name}[/bold]')
 
                 if not input_prompt:
                     console.print(f'[yellow]WARNING ⚠️: No input prompt for {input_file}[/yellow]')
