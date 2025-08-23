@@ -156,6 +156,7 @@ class Client:
 @hydra.main(config_path='../config', config_name='client', version_base=None)
 def main(cfg: DictConfig):
     console.print(config_table(cfg))
+    output_dir = None
 
     try:
         # create the client and initialize inputs.
@@ -271,7 +272,8 @@ def main(cfg: DictConfig):
     except KeyboardInterrupt:
         console.print(f'\n[yellow]DONE: exiting early...[/bold yellow]')
     finally:
-        console.print(f'\n[bold green]DONE: {output_dir}[/bold green]')
+        if output_dir is not None:
+            console.print(f'\n[bold green]DONE: {output_dir}[/bold green]')
         return
 
 if __name__ == '__main__':
