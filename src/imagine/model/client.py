@@ -21,7 +21,7 @@ from rich.table import Table
 from rich.text import Text
 from typing import Any, Dict, List
 
-from imagine.model.utils import base64_image_array, load_prompts
+from imagine.model.utils import base64_image_array, config_table, load_prompts
 
 console = Console()
 log = logging.getLogger('imagine.model.client')
