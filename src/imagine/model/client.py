@@ -267,10 +267,10 @@ def main(cfg: DictConfig):
             json.dump(results, f, indent=2)
 
     except Exception as client_exception:
-        console.print(f'\n[red]DONE: {client_exception=}[/bold red]')
+        console.print(f'\n[bold red]DONE: {client_exception=}[/bold red]')
         raise
     except KeyboardInterrupt:
-        console.print(f'\n[yellow]DONE: exiting early...[/bold yellow]')
+        console.print(f'\n[bold yellow]DONE: exiting early...[/bold yellow]')
     finally:
         if output_dir is not None:
             console.print(f'\n[bold green]DONE: {output_dir}[/bold green]')
