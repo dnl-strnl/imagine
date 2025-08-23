@@ -169,7 +169,7 @@ def main(cfg: DictConfig):
             image_files = [input_path]
         elif input_path.is_dir():
             image_files = [f for f in input_path.iterdir()
-                          if f.suffix.lower() in cfg.data.image_extensions]
+                          if f.suffix.lower() in ['.jpeg','.jpg','.png']]
         else:
             image_files = [Path(f) for f in glob.glob(str(input_path))]
 

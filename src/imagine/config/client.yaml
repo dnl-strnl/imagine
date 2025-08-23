@@ -3,7 +3,7 @@ data:
   prompt: ???
 
 client:
-  _target_: imagine.models.client.Client
+  _target_: imagine.model.client.Client
   model_endpoint: http://0.0.0.0:44773
   estimated_wait: 240
 
