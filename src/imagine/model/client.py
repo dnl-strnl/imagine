@@ -82,7 +82,7 @@ class Client:
 
         # check for timeout.
         if prediction_thread.is_alive():
-            logging.error(f'{}')
+            logging.error(f'error: {timeout=} reached waiting for a response...')
             return {}
 
         # check for errors.
