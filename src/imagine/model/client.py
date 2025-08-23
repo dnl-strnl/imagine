@@ -27,7 +27,7 @@ console = Console()
 log = logging.getLogger('imagine.model.client')
 
 class Client:
-    def __init__(self, model_endpoint: str, estimate_wait:int = None):
+    def __init__(self, model_endpoint: str, estimated_wait:int = None):
         self.model_endpoint = model_endpoint
         self.estimated_wait = estimated_wait
 
