@@ -274,7 +274,6 @@ def main(cfg: DictConfig):
     finally:
         if output_dir is not None:
             console.print(f'\n[bold green]DONE: {output_dir}[/bold green]')
-        return
 
 if __name__ == '__main__':
     main()
