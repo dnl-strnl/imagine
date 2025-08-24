@@ -37,7 +37,7 @@ class API(litserve.LitAPI):
             low_cpu_mem_usage=True,
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
-        ).to(device)
+        )
 
         # print memory footprint.
         if torch.cuda.is_available():
