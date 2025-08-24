@@ -64,7 +64,6 @@ class API(litserve.LitAPI):
             height, width = self.aspect_ratios[aspect_ratio]
 
         result = self.pipe(
-            image=image,
             height=height,
             width=width,
             generator=generator,
