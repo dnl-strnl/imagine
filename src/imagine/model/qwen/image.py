@@ -1,5 +1,5 @@
 import base64
-from diffusers import DiffusionPipeline
+from diffusers import QwenImagePipeline, QwenImageTransformer2DModel
 import hydra
 from hydra.utils import instantiate
 import io
@@ -8,6 +8,7 @@ import logging
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 import torch
+from transformers import BitsAndBytesConfig, Qwen2_5_VLForConditionalGeneration
 from typing import Any, Dict
 
 class API(litserve.LitAPI):
@@ -30,13 +31,41 @@ class API(litserve.LitAPI):
         torch.backends.cuda.enable_mem_efficient_sdp(True)
         torch.backends.cuda.enable_math_sdp(True)
 
-        # load image transformer model.
-        self.pipe = DiffusionPipeline.from_pretrained(
+        shared_args = dict(
             pretrained_model_name_or_path="Qwen/Qwen-Image",
             device_map="balanced",
             low_cpu_mem_usage=True,
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
+        )
+
+        quantization = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            llm_int8_skip_modules=["transformer_blocks.0.img_mod"]
+        )
+
+        # load image transformer model.
+        self.transformer = QwenImageTransformer2DModel.from_pretrained(
+            subfolder="transformer",
+            quantization_config=quantization,
+            **shared_args
+        )
+
+        # load text encoder model.
+        self.text_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            subfolder="text_encoder",
+            quantization_config=quantization,
+            **shared_args
+        )
+
+        # wrap model components.
+        self.pipe = QwenImagePipeline.from_pretrained(
+            transformer=self.transformer,
+            text_encoder=self.text_encoder,
+            **shared_args
         )
 
         # print memory footprint.
@@ -73,7 +102,7 @@ class API(litserve.LitAPI):
         image = result.images[0]
 
         buffer = io.BytesIO()
-        processed_image.save(buffer, format="PNG")
+        image.save(buffer, format="PNG")
         base64_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
         return dict(image=base64_image, seed=seed, **inputs)
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 from rich.table import Table
 from rich.text import Text
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 import yaml
 
 def base64_image_array(image_array: np.ndarray) -> str:
@@ -91,54 +91,87 @@ def config_table(cfg: DictConfig) -> Table:
     return table
 
 def load_prompts(
-    prompt_config: Union[str, dict, Path], image_files: List[Path]
+    prompt_config: Union[str, dict, Path, List[str]],
+    image_files: Optional[List[Path]] = None
 ) -> Dict[str, str]:
-    """Load prompts based on configuration type."""
+    """
+    Load prompts based on configuration type."""
 
-    # handle dictionary input: absolute filepath -> prompt
+    # Handle list input: list of prompt strings (text-to-image only)
+    if isinstance(prompt_config, list):
+        if image_files:
+            raise ValueError("List of prompts not supported for image-to-image mode")
+        return {f"prompt_{i}": str(prompt) for i, prompt in enumerate(prompt_config)}
+
+    # Handle dictionary input: flexible mapping (image-to-image only)
     if isinstance(prompt_config, dict):
-        return {str(k): str(v) for k, v in prompt_config.items()}
+        if not image_files:
+            raise ValueError("Dictionary prompts only supported for image-to-image mode")
+        return _parse_prompt_dict(prompt_config, image_files)
 
-    # handle string input (filename or prompt string).
+    # Handle string input (filename or prompt string)
     if isinstance(prompt_config, (str, Path)):
         prompt_path = Path(prompt_config)
 
-        # attempt to load from file.
+        # Attempt to load from file if it exists
         if prompt_path.exists():
-            return _load_prompts_from_file(prompt_path, image_files)
+            return load_prompts_from_file(prompt_path, image_files)
 
-        # fallback: use single prompt for all images.
-        return {str(image_file): str(prompt_config) for image_file in image_files}
+        # Fallback: treat as single prompt string
+        if image_files:
+            # Image-to-image: map single prompt to all images
+            return {str(image_file): str(prompt_config) for image_file in image_files}
+        else:
+            # Text-to-image: return single prompt with generic key
+            return {"prompt_0": str(prompt_config)}
 
-    raise ValueError(f'{type(prompt_config)=}')
+    raise ValueError(f'Unsupported prompt_config type: {type(prompt_config)}')
 
-def _load_prompts_from_file(prompt_path: Path, image_files: List[Path]) -> Dict[str, str]:
+def load_prompts_from_file(
+    prompt_path: Path,
+    image_files: Optional[List[Path]] = None
+) -> Dict[str, str]:
     """Load prompts from a file."""
     suffix = prompt_path.suffix.lower()
 
     if suffix == '.txt':
-        return _load_text_prompts(prompt_path, image_files)
-    elif suffix in ['.json', '.yaml']:
-        return _load_structured_prompts(prompt_path, image_files)
+        return load_text_prompts(prompt_path, image_files)
+    elif suffix in ['.json', '.yaml', '.yml']:
+        return load_structured_prompts(prompt_path, image_files)
     else:
-        raise ValueError(f'Unsupported: {suffix=}')
+        raise ValueError(f'Unsupported file extension: {suffix}')
 
-def _load_text_prompts(prompt_path: Path, image_files: List[Path]) -> Dict[str, str]:
-    """Load prompts from a text file."""
+def load_text_prompts(
+    prompt_path: Path,
+    image_files: Optional[List[Path]] = None
+) -> Dict[str, str]:
+    """Load prompts from a text file (one prompt per line)."""
     with open(prompt_path, 'r', encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
 
     if not lines:
-        raise ValueError(f'{prompt_path=}: {len(lines)=}')
+        raise ValueError(f'No valid prompts found in {prompt_path}')
 
-    if len(lines) == 1:  # one prompt for all images.
-        return {str(image_file): lines[0] for image_file in image_files}
+    if image_files:
+        # Map prompts to images
+        if len(lines) == 1:
+            # Single prompt for all images
+            return {str(image_file): lines[0] for image_file in image_files}
+        else:
+            # Cycle through prompts for multiple images
+            return {str(image_file): lines[i % len(lines)]
+                   for i, image_file in enumerate(image_files)}
+    else:
+        # No images - return prompts with sequential keys
+        return {f"prompt_{i}": prompt for i, prompt in enumerate(lines)}
 
-    # cycle multiple prompts.
-    return {str(image_file): lines[i % len(lines)] for i, image_file in enumerate(image_files)}
-
-def _load_structured_prompts(prompt_path: Path, image_files: List[Path]) -> Dict[str, str]:
-    """Load prompts from JSON/YAML file."""
+def load_structured_prompts(
+    prompt_path: Path,
+    image_files: Optional[List[Path]] = None
+) -> Dict[str, str]:
+    """Load prompts from JSON/YAML file (image-to-image only)."""
+    if not image_files:
+        raise ValueError("Structured prompt files (JSON/YAML) only supported for image-to-image mode")
 
     with open(prompt_path, 'r', encoding='utf-8') as f:
         if prompt_path.suffix.lower() == '.json':
@@ -146,28 +179,70 @@ def _load_structured_prompts(prompt_path: Path, image_files: List[Path]) -> Dict
         else:
             prompt_data = yaml.safe_load(f)
 
+    if not isinstance(prompt_data, dict):
+        raise ValueError(f'Expected dict in {prompt_path}, got {type(prompt_data)}')
+
+    return _parse_prompt_dict(prompt_data, image_files)
+
+def _parse_prompt_dict(prompt_data: dict, image_files: List[Path]) -> Dict[str, str]:
+    """Parse flexible prompt dictionary structures."""
     prompts = {}
-    missing_keys = []
-    # create prompt to image mapping...
-    for image_file in image_files:
-        image_key = str(image_file)
 
-        # find prompt for image using various key formats.
-        prompt = None
-        candidates = [
-            str(image_file),  # full path
-            image_file.name,  # filename with extension
-            image_file.stem,  # filename without extension
-        ]
-        for candidate in candidates:
-            if candidate in prompt_data:
-                prompt = str(prompt_data[candidate])
-                break
+    # create lookup sets for efficient matching.
+    image_paths = {str(img) for img in image_files}
+    image_names = {img.name for img in image_files}
+    image_stems = {img.stem for img in image_files}
 
-        if prompt is not None:
-            prompts[image_key] = prompt
+    def find_image_matches(key: str) -> List[Path]:
+        """Find image files that match the given key."""
+        matches = []
+        for img in image_files:
+            if key in [str(img), img.name, img.stem]:
+                matches.append(img)
+        return matches
+
+    def is_image_reference(key: str) -> bool:
+        """Check if key refers to an image file."""
+        return key in image_paths or key in image_names or key in image_stems
+
+    # process each key-value pair in the dict...
+    for key, value in prompt_data.items():
+        key_str = str(key)
+
+        if is_image_reference(key_str):
+            # Case 1: "image1.jpg": "prompt" or "image1.jpg": ["prompt1", "prompt2"]
+            matching_images = find_image_matches(key_str)
+
+            if isinstance(value, list):
+                # multiple prompts for one image.
+                for i, img in enumerate(matching_images):
+                    prompt_idx = i % len(value)
+                    prompts[str(img)] = str(value[prompt_idx])
+            else:
+                # single prompt for matching image(s).
+                for img in matching_images:
+                    prompts[str(img)] = str(value)
         else:
-            missing_keys.append(image_key)
+            # Case 2: "prompt": "image1.jpg" or "prompt": ["image1.jpg", "image2.jpg"]
+            prompt_text = key_str
+
+            if isinstance(value, list):
+                # one prompt for multiple images.
+                for img_ref in value:
+                    matching_images = find_image_matches(str(img_ref))
+                    for img in matching_images:
+                        prompts[str(img)] = prompt_text
+            else:
+                # one prompt for one image.
+                matching_images = find_image_matches(str(value))
+                for img in matching_images:
+                    prompts[str(img)] = prompt_text
+
+    # check for missing mappings.
+    missing_keys = []
+    for img in image_files:
+        if str(img) not in prompts:
+            missing_keys.append(str(img))
 
     if missing_keys:
         raise ValueError(f'No prompts found for images: {missing_keys}')
