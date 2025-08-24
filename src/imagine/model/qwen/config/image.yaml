@@ -1,10 +1,10 @@
 host: 0.0.0.0
-port: 28371
+port: 28370
 apis: 1
 
 server:
   _target_: litserve.LitServer
   lit_api:
-    _target_: imagine.model.qwen.image_edit.API
+    _target_: imagine.model.qwen.image.API
   accelerator: cuda
   devices: 1
