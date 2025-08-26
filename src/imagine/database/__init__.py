@@ -9,6 +9,10 @@ class ImageDatabase:
 
     def _init_db(self):
         """Initialize the database with proper schema."""
+
+        # create the database file parent directory.
+        Path(self.db_file).parent.mkdir(parents=True, exist_ok=True)
+
         with sqlite3.connect(self.db_file) as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS images (
