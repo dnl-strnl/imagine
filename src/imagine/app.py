@@ -91,11 +91,18 @@ def make_app(cfg):
             output = requests.post(
                 app.config['MODEL'], json=api_payload, verify=cfg.model_cert
             )
+
             result = json.loads(output.content)
-            output = json.loads(result['body'])
+            print(result)
+            if 'images' in result:
+                image_list = result['images']
+            elif 'image' in result:
+                image_list = [result['image']]
+            else:
+                return jsonify(dict(error='No image data in response.')), 500
 
             image_metadata = []
-            for idx, image_bytes in enumerate(output['images']):
+            for idx, image_bytes in enumerate(image_list):
                 filestem = db_payload['prompt'] + f'_{str(uuid.uuid4())[:8]}'
                 filename = f'{secure_filename(filestem)}.png'
                 filepath = str(app.config['GENERATED'] / filename)
