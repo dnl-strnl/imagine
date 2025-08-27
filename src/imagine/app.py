@@ -93,7 +93,7 @@ def make_app(cfg):
             )
 
             result = json.loads(output.content)
-            print(result)
+
             if 'images' in result:
                 image_list = result['images']
             elif 'image' in result:
