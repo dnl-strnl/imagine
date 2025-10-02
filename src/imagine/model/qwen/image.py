@@ -2,6 +2,7 @@ import base64
 from diffusers import QwenImagePipeline, QwenImageTransformer2DModel
 import hydra
 from hydra.utils import instantiate
+import inspect
 import io
 import litserve
 import logging
@@ -78,16 +79,22 @@ class API(litserve.LitAPI):
         json_data = request if not "body" in request else request["body"]
         return json_data
 
-    def predict(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        image = inputs.pop("image", None)
-        print(inputs)
-
-        seed = inputs.pop("seed", 0)
+    def predict(self, inputs:Dict[str, Any]) -> Dict[str, Any]:
+        image = inputs.pop('image', None)
+        # set random seed or default to zero.
+        seed = inputs.pop('seed', 0)
         generator = torch.Generator(device=self.pipe.device).manual_seed(seed)
 
-        if "height" in inputs and "width" in inputs:
-            height = inputs.pop("height")
-            width = inputs.pop("width")
+        print(f'{inputs=}')
+
+        # filter inputs to only include valid parameters
+        pipe_params = set(inspect.signature(self.pipe.__call__).parameters.keys())
+        filtered = {k: v for k, v in inputs.items() if k in pipe_params}
+        print(f'{filtered=}')
+
+        if "height" in filtered and "width" in filtered:
+            height = filtered.pop("height")
+            width = filtered.pop("width")
         else:
             aspect_ratio = inputs.pop("aspect_ratio", "1:1")
             height, width = self.aspect_ratios[aspect_ratio]
@@ -97,7 +104,7 @@ class API(litserve.LitAPI):
             width=width,
             generator=generator,
             output_type="pil",
-            **inputs
+            **filtered
         )
         image = result.images[0]
 

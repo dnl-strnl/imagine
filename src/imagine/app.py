@@ -63,14 +63,14 @@ def make_app(cfg):
             app.config['MODEL'] = data.get('model', default_model)
 
             payload = dict(
-                prompt=prompt,
                 seed=int(data.get('seed', 0)),
-                batch=min(int(data.get('batch_size', 1)), cfg.max_batch),
+                prompt=prompt,
                 negative_prompt=data.get('negative_prompt', ''),
                 width=int(data.get('width', default_image_width)),
                 height=int(data.get('height', default_image_height)),
-                guidance_scale=float(data.get('guidance_scale', cfg.guidance_scale)),
                 num_inference_steps=int(data.get('num_inference_steps', max_steps)),
+                batch=min(int(data.get('batch_size', 1)), cfg.max_batch),
+                guidance_scale=float(data.get('guidance_scale', cfg.guidance_scale)),
             )
 
             image = None
