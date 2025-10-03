@@ -25,14 +25,11 @@ def make_app(cfg):
     app.config['UPLOADS'] = Path(cfg.datadir) / 'uploads'
     app.config['GENERATED'].mkdir(parents=True, exist_ok=True)
     app.config['UPLOADS'].mkdir(parents=True, exist_ok=True)
-    app.config['MODEL'] = default_model = cfg.model_name
+    app.config['MODEL'] = default_model = f'{cfg.model_host}:{cfg.model_port}/predict'
 
     max_steps = cfg.num_inference_steps
     default_image_width = cfg.default_image_width
     default_image_height = cfg.default_image_height
-
-    model_url = lambda model_name: \
-        f"{cfg.model_host}:{cfg.model_port}/predictions/{model_name}"
 
     @app.route('/model-info', methods=['GET'])
     def get_model_info():
@@ -66,14 +63,14 @@ def make_app(cfg):
             app.config['MODEL'] = data.get('model', default_model)
 
             payload = dict(
-                prompt=prompt,
                 seed=int(data.get('seed', 0)),
-                batch=min(int(data.get('batch_size', 1)), cfg.max_batch),
+                prompt=prompt,
                 negative_prompt=data.get('negative_prompt', ''),
                 width=int(data.get('width', default_image_width)),
                 height=int(data.get('height', default_image_height)),
-                guidance_scale=float(data.get('guidance_scale', cfg.guidance_scale)),
                 num_inference_steps=int(data.get('num_inference_steps', max_steps)),
+                batch=min(int(data.get('batch_size', 1)), cfg.max_batch),
+                guidance_scale=float(data.get('guidance_scale', cfg.guidance_scale)),
             )
 
             image = None
@@ -82,7 +79,7 @@ def make_app(cfg):
                 if source_image.exists():
                     img = Image.open(source_image)
                     buffer = io.BytesIO()
-                    img.save(buffer, format="PNG")
+                    img.save(buffer, format='PNG')
                     image = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
             api_payload = dict(image=image, **payload)
@@ -91,15 +88,23 @@ def make_app(cfg):
                 model=app.config['MODEL'], source_image=image_path, **payload
             )
 
-            url = model_url(model := app.config['MODEL'])
-            output = requests.post(url, json=api_payload, verify=cfg.model_cert)
+            output = requests.post(
+                app.config['MODEL'], json=api_payload, verify=cfg.model_cert
+            )
+
             result = json.loads(output.content)
-            output = json.loads(result['body'])
+
+            if 'images' in result:
+                image_list = result['images']
+            elif 'image' in result:
+                image_list = [result['image']]
+            else:
+                return jsonify(dict(error='No image data in response.')), 500
 
             image_metadata = []
-            for idx, image_bytes in enumerate(output['images']):
+            for idx, image_bytes in enumerate(image_list):
                 filestem = db_payload['prompt'] + f'_{str(uuid.uuid4())[:8]}'
-                filename = f"{secure_filename(filestem)}.png"
+                filename = f'{secure_filename(filestem)}.png'
                 filepath = str(app.config['GENERATED'] / filename)
                 url = f'/generated/{filename}'
 
@@ -119,7 +124,7 @@ def make_app(cfg):
 
             return jsonify(dict(success=True, images=image_metadata))
         except Exception as image_generation_exception:
-            log.error(error := f"{image_generation_exception=}")
+            log.error(error := f'{image_generation_exception=}')
             return jsonify(dict(error=error)), 500
 
     @app.route('/upload', methods=['POST'])
@@ -139,7 +144,7 @@ def make_app(cfg):
 
     return app
 
-@hydra.main(version_base=None, config_path="config", config_name="app")
+@hydra.main(version_base=None, config_path='config', config_name='app')
 def main(cfg: DictConfig):
     app = make_app(cfg)
     app.run(host=cfg.app_host, port=cfg.app_port, debug=cfg.debug)

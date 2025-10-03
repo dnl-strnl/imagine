@@ -15,9 +15,100 @@ const API_ENDPOINTS = {
     MODEL_INFO: '/model-info'
 };
 
+class ProgressTracker {
+    constructor() {
+        this.isRunning = false;
+        this.startTime = null;
+        this.estimatedDuration = 30;
+        this.animationFrame = null;
+        this.elements = {
+            container: document.getElementById('progressContainer'),
+            fill: document.getElementById('progressFill'),
+            percentage: document.getElementById('progressPercentage'),
+            elapsed: document.getElementById('elapsedTime'),
+            remaining: document.getElementById('remainingTime')
+        };
+    }
+
+    start(estimatedDuration = 30) {
+        if (this.isRunning) return;
+
+        this.estimatedDuration = estimatedDuration;
+        this.isRunning = true;
+        this.startTime = Date.now();
+
+        if (this.elements.container) {
+            this.elements.container.classList.add('show');
+        }
+        this.updateProgress();
+    }
+
+    stop() {
+        if (!this.isRunning) return;
+
+        this.isRunning = false;
+        if (this.animationFrame) {
+            cancelAnimationFrame(this.animationFrame);
+        }
+
+        // Complete the progress bar
+        if (this.elements.fill) this.elements.fill.style.width = '100%';
+        if (this.elements.percentage) this.elements.percentage.textContent = '100%';
+        if (this.elements.remaining) this.elements.remaining.textContent = '0s';
+
+        // Hide after a short delay
+        setTimeout(() => {
+            if (this.elements.container) {
+                this.elements.container.classList.remove('show');
+            }
+            this.reset();
+        }, 1000);
+    }
+
+    cancel() {
+        if (!this.isRunning) return;
+
+        this.isRunning = false;
+        if (this.animationFrame) {
+            cancelAnimationFrame(this.animationFrame);
+        }
+
+        if (this.elements.container) {
+            this.elements.container.classList.remove('show');
+        }
+        this.reset();
+    }
+
+    reset() {
+        if (this.elements.fill) this.elements.fill.style.width = '0%';
+        if (this.elements.percentage) this.elements.percentage.textContent = '0%';
+        if (this.elements.elapsed) this.elements.elapsed.textContent = '0s';
+        if (this.elements.remaining) this.elements.remaining.textContent = '--s';
+    }
+
+    updateProgress() {
+        if (!this.isRunning) return;
+
+        const elapsed = (Date.now() - this.startTime) / 1000;
+
+        // Cap progress at 99% until we know the request is complete
+        const progressPercent = Math.min(elapsed / this.estimatedDuration, 0.99) * 100;
+        const remaining = Math.max(this.estimatedDuration - elapsed, 0);
+
+        if (this.elements.fill) this.elements.fill.style.width = `${progressPercent}%`;
+        if (this.elements.percentage) this.elements.percentage.textContent = `${Math.round(progressPercent)}%`;
+        if (this.elements.elapsed) this.elements.elapsed.textContent = `${Math.round(elapsed)}s`;
+        if (this.elements.remaining) this.elements.remaining.textContent = `${Math.round(remaining)}s`;
+
+        // Continue updating
+        this.animationFrame = requestAnimationFrame(() => this.updateProgress());
+    }
+}
+
 class ImageGenerator {
-      constructor() {
+    constructor() {
         this.elements = this.initializeElements();
+        this.progressTracker = new ProgressTracker();
 
         this.state = {
             isGenerating: false,
@@ -63,8 +154,19 @@ class ImageGenerator {
         });
 
         elements.sourceImagePreview.className = 'source-image-preview';
-        elements.dropZone.appendChild(elements.sourceImagePreview);
+        if (elements.dropZone) {
+            elements.dropZone.appendChild(elements.sourceImagePreview);
+        }
         return elements;
+    }
+
+    calculateEstimatedWait(batchSize, numInferenceSteps) {
+        // Estimate based on your model's performance
+        const baseTimePerImage = 8; // seconds per image
+        const stepMultiplier = numInferenceSteps / 50; // normalize to 50 steps
+        const batchMultiplier = Math.sqrt(batchSize); // batch processing is more efficient
+
+        return Math.round(baseTimePerImage * stepMultiplier * batchMultiplier);
     }
 
     async initializeApp() {
@@ -101,7 +203,7 @@ class ImageGenerator {
     }
 
     setupEventListeners() {
-        // Generate button events.
+        // Generate button events
         this.elements.generateBtn.addEventListener('click', this.handleGenerate.bind(this));
         this.elements.promptInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -110,14 +212,14 @@ class ImageGenerator {
             }
         });
 
-        // Batch size input.
+        // Batch size input
         this.elements.batchSizeInput?.addEventListener('change', (e) => {
             const value = Math.max(1, Math.min(4, parseInt(e.target.value) || 1));
             e.target.value = value;
             this.handleSettingsChange({ batchSize: value });
         });
 
-        // Seed input.
+        // Seed input
         this.elements.seedInput?.addEventListener('change', (e) => {
             const value = parseInt(e.target.value) || '';
             this.handleSettingsChange({ seed: value });
@@ -128,6 +230,8 @@ class ImageGenerator {
 
     setupFileUploadListeners() {
         const { dropZone, fileInput } = this.elements;
+
+        if (!dropZone || !fileInput) return;
 
         dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', (e) => {
@@ -216,8 +320,17 @@ class ImageGenerator {
 
         try {
             this.state.isGenerating = true;
-            this.showLoading(true);
             this.elements.generateBtn.disabled = true;
+            this.elements.generateBtn.textContent = 'Generating...';
+
+            // Calculate estimated wait time
+            const estimatedWait = this.calculateEstimatedWait(
+                this.state.settings.batchSize,
+                this.state.settings.num_inference_steps
+            );
+
+            // Start progress tracking
+            this.progressTracker.start(estimatedWait);
 
             const response = await fetch(API_ENDPOINTS.GENERATE, {
                 method: 'POST',
@@ -242,14 +355,22 @@ class ImageGenerator {
                 throw new Error(data.error || 'Generation failed');
             }
 
-            this.addGeneratedImages(data.images);
+            // Stop progress and show completion
+            this.progressTracker.stop();
+
+            // Add generated images after a short delay to show completion
+            setTimeout(() => {
+                this.addGeneratedImages(data.images);
+            }, 1200);
+
         } catch (error) {
             console.error('Generation error:', error);
+            this.progressTracker.cancel();
             alert('Failed to generate images: ' + error.message);
         } finally {
             this.state.isGenerating = false;
-            this.showLoading(false);
             this.elements.generateBtn.disabled = false;
+            this.elements.generateBtn.textContent = 'Generate';
         }
     }
 
@@ -371,11 +492,13 @@ class ImageGenerator {
     }
 
     showLoading(show) {
-        this.elements.loadingIndicator.style.display = show ? 'block' : 'none';
+        if (this.elements.loadingIndicator) {
+            this.elements.loadingIndicator.style.display = show ? 'block' : 'none';
+        }
     }
 }
 
-// Initialize app when DOM is ready...
+// Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new ImageGenerator();
 });

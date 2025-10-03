@@ -1,0 +1,14 @@
+data:
+  image: null
+  prompt: ???
+
+client:
+  _target_: imagine.model.client.Client
+  model_endpoint: http://0.0.0.0:28371
+  estimated_wait: 240
+
+inference:
+  num_inference_steps: 50
+
+output:
+  path: ${hydra:runtime.output_dir}
