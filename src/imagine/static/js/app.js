@@ -12,8 +12,30 @@ const DEFAULT_SETTINGS = {
 const API_ENDPOINTS = {
     UPLOAD: '/upload',
     GENERATE: '/generate',
-    MODEL_INFO: '/model-info'
+    MODEL_INFO: '/model-info',
+    SWEEPS: '/sweeps',
+    MEDIA: '/media'
 };
+
+const QUEUE_POLL_INTERVAL = 3000;
+
+function formatDuration(seconds) {
+    seconds = Math.max(0, Math.round(seconds || 0));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+    if (minutes) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
+    return `${seconds}s`;
+}
+
+function formatClock(isoTime) {
+    if (!isoTime) return '--';
+    const time = new Date(isoTime);
+    const clock = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return time.toDateString() === new Date().toDateString()
+        ? clock
+        : `${time.toLocaleDateString([], { weekday: 'short' })} ${clock}`;
+}
 
 class ProgressTracker {
     constructor() {
@@ -114,6 +136,10 @@ class ImageGenerator {
             isGenerating: false,
             generatedImages: [],
             sourceImage: null,
+            sweeps: [],
+            selectedSweep: null,
+            finishedJobs: null,
+            lastMediaId: 0,
             settings: {
                 ...DEFAULT_SETTINGS,
                 batchSize: this.getBatchSizeFromDOM(),
@@ -137,6 +163,7 @@ class ImageGenerator {
     initializeElements() {
         const elements = {
             promptInput: document.getElementById('promptInput'),
+            styleInput: document.getElementById('styleInput'),
             generateBtn: document.getElementById('generateBtn'),
             dropZone: document.getElementById('dropZone'),
             fileInput: document.getElementById('fileInput'),
@@ -170,10 +197,132 @@ class ImageGenerator {
     }
 
     async initializeApp() {
-        await this.fetchModelInfo();
+        const modelInfo = await this.fetchModelInfo();
         this.initializeSettingsPanel();
         this.setupEventListeners();
         this.loadSavedImages();
+        this.initializeVideoMode(modelInfo);
+    }
+
+    initializeVideoMode(modelInfo) {
+        // Mode tabs
+        this.elements.imageGrid.dataset.mode = 'image';
+        document.querySelectorAll('.mode-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.mode-tab').forEach(other => {
+                    other.classList.toggle('active', other === tab);
+                });
+                document.getElementById('imageMode').hidden = tab.dataset.mode !== 'image';
+                document.getElementById('videoMode').hidden = tab.dataset.mode !== 'video';
+                this.elements.imageGrid.dataset.mode = tab.dataset.mode;
+                if (tab.dataset.mode === 'image') this.selectSweep(null);
+            });
+        });
+
+        const sweepBuilderRoot = document.getElementById('sweepBuilderRoot');
+        if (sweepBuilderRoot) {
+            this.modelInfo = modelInfo;
+            FrameLibrary.refresh().catch(error => console.error('Frame library error:', error));
+            this.sweepRoot = ReactDOM.createRoot(sweepBuilderRoot);
+            this.renderSweepBuilder();
+
+            window.addEventListener('imagine:set-frame', () => {
+                document.querySelector('.mode-tab[data-mode="video"]:not(.active)')?.click();
+                sweepBuilderRoot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+
+        const queuePanelRoot = document.getElementById('queuePanelRoot');
+        if (queuePanelRoot) {
+            this.queueRoot = ReactDOM.createRoot(queuePanelRoot);
+            this.pollQueue();
+            setInterval(() => this.pollQueue(), QUEUE_POLL_INTERVAL);
+        }
+    }
+
+    renderSweepBuilder() {
+        const media = [...this.state.generatedImages]
+            .sort((a, b) => (b.id || Infinity) - (a.id || Infinity))
+            .slice(0, 24);
+
+        this.sweepRoot?.render(
+            React.createElement(SweepBuilder, {
+                modelInfo: this.modelInfo,
+                media,
+                onQueued: () => this.pollQueue()
+            })
+        );
+    }
+
+    async pollQueue() {
+        try {
+            const response = await fetch(API_ENDPOINTS.SWEEPS);
+            const { sweeps } = await response.json();
+
+            // Shown only while something is queued or running
+            const isActive = (sweep) => sweep.counts.queued + sweep.counts.running > 0;
+            this.state.sweeps = sweeps.some(isActive)
+                ? sweeps.filter((sweep, index) => index < 3 || isActive(sweep))
+                : [];
+
+            const selected = this.state.selectedSweep;
+            if (selected != null && !this.state.sweeps.some(sweep => sweep.id === selected)) {
+                this.selectSweep(null);
+            } else {
+                this.renderQueue();
+            }
+
+            const finished = sweeps.reduce((sum, sweep) => sum + sweep.counts.done, 0);
+            if (finished !== this.state.finishedJobs) {
+                this.state.finishedJobs = finished;
+                await this.fetchNewMedia();
+            }
+        } catch (error) {
+            console.error('Queue error:', error);
+        }
+    }
+
+    renderQueue() {
+        this.queueRoot?.render(
+            React.createElement(QueuePanel, {
+                sweeps: this.state.sweeps,
+                selectedSweep: this.state.selectedSweep,
+                onSelect: (sweepId) => this.selectSweep(sweepId),
+                onCancel: (sweepId) => this.cancelSweep(sweepId)
+            })
+        );
+    }
+
+    async cancelSweep(sweepId) {
+        await fetch(`${API_ENDPOINTS.SWEEPS}/${sweepId}/cancel`, { method: 'POST' });
+        this.pollQueue();
+    }
+
+    selectSweep(sweepId) {
+        this.state.selectedSweep = sweepId;
+        this.elements.imageGrid.querySelectorAll('.image-item').forEach(item => {
+            item.hidden = sweepId !== null && item.dataset.sweepId !== String(sweepId);
+        });
+        this.renderQueue();
+    }
+
+    async fetchNewMedia() {
+        const response = await fetch(`${API_ENDPOINTS.MEDIA}?after=${this.state.lastMediaId}`);
+        const data = await response.json();
+        if (data.media.length === 0) return;
+
+        this.state.lastMediaId = Math.max(this.state.lastMediaId, ...data.media.map(item => item.id));
+
+        const shown = new Set(this.state.generatedImages.map(image => image.url));
+        const media = data.media.filter(item => !shown.has(item.url));
+
+        const fragment = document.createDocumentFragment();
+        media.forEach(item => {
+            this.state.generatedImages.push(item);
+            fragment.appendChild(this.createImageElement(item));
+        });
+        this.elements.imageGrid.insertBefore(fragment, this.elements.imageGrid.firstChild);
+        this.renderSweepBuilder();
     }
 
     handleSettingsChange(newSettings) {
@@ -337,6 +486,7 @@ class ImageGenerator {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   prompt,
+                  style: this.elements.styleInput?.value.trim() || '',
                   batch_size: this.state.settings.batchSize,
                   seed: this.state.settings.seed || undefined,
                   guidance_scale: this.state.settings.guidanceScale,
@@ -389,15 +539,40 @@ class ImageGenerator {
         });
 
         this.elements.imageGrid.insertBefore(fragment, this.elements.imageGrid.firstChild);
+        this.renderSweepBuilder();
     }
 
     createImageElement(image) {
         const imageElement = document.createElement('div');
         imageElement.className = 'image-item';
 
-        const imgElement = document.createElement('img');
+        const isVideo = image.media_type === 'video';
+        imageElement.dataset.media = isVideo ? 'video' : 'image';
+        imageElement.draggable = true;
+        imageElement.addEventListener('dragstart', (event) => dragMedia(event, image));
+        const imgElement = document.createElement(isVideo ? 'video' : 'img');
         imgElement.src = image.url;
-        imgElement.alt = image.prompt || 'Generated image';
+        if (isVideo) {
+            imgElement.muted = true;
+            imgElement.loop = true;
+            imgElement.playsInline = true;
+            imgElement.preload = 'metadata';
+            imageElement.addEventListener('mouseenter', () => imgElement.play().catch(() => {}));
+            imageElement.addEventListener('mouseleave', () => imgElement.pause());
+
+            const badge = document.createElement('div');
+            badge.className = 'video-badge';
+            badge.textContent = `▶ ${formatDuration(image.num_frames / image.fps)}`;
+            imageElement.appendChild(badge);
+        } else {
+            imgElement.alt = image.prompt || 'Generated image';
+        }
+
+        if (image.sweep_id) {
+            imageElement.dataset.sweepId = image.sweep_id;
+            imageElement.hidden = this.state.selectedSweep != null
+                && this.state.selectedSweep !== image.sweep_id;
+        }
 
         const promptElement = document.createElement('div');
         promptElement.className = 'image-prompt';
@@ -407,24 +582,27 @@ class ImageGenerator {
         imageElement.appendChild(promptElement);
 
         imageElement.addEventListener('click', () => {
-            const index = this.state.generatedImages.findIndex(img => img.url === image.url);
+            const shown = this.state.generatedImages.filter(img => {
+                return (img.media_type === 'video') === isVideo;
+            });
+            const index = shown.findIndex(img => img.url === image.url);
             if (index !== -1) {
-                this.showImagePreview(index);
+                this.showImagePreview(index, shown);
             }
         });
 
         return imageElement;
     }
 
-    showImagePreview(index) {
-        if (!this.state.generatedImages?.[index]) return;
+    showImagePreview(index, images = this.state.generatedImages) {
+        if (!images?.[index]) return;
 
         const modalRoot = document.getElementById('previewModalRoot');
         if (!modalRoot) return;
 
         ReactDOM.createRoot(modalRoot).render(
             React.createElement(ImagePreviewModal, {
-                images: this.state.generatedImages,
+                images,
                 initialIndex: index,
                 onClose: () => {
                     ReactDOM.createRoot(modalRoot).unmount();
@@ -482,6 +660,7 @@ class ImageGenerator {
         if (typeof saved_images === 'undefined') return;
 
         this.state.generatedImages = saved_images;
+        this.state.lastMediaId = Math.max(0, ...saved_images.map(image => image.id || 0));
         const fragment = document.createDocumentFragment();
 
         saved_images.forEach(image => {

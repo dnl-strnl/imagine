@@ -1,5 +1,6 @@
 const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
     const [currentIndex, setCurrentIndex] = React.useState(initialIndex);
+    const videoRef = React.useRef(null);
 
     if (!images || !images[currentIndex]) {
         console.error('Invalid images or index');
@@ -7,6 +8,8 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
     }
 
     const currentImage = images[currentIndex];
+    const isVideo = currentImage.media_type === 'video';
+    const references = currentImage.references || [];
 
     React.useEffect(() => {
         const handleKeyPress = (e) => {
@@ -149,11 +152,21 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
                         style: { ...buttonStyle, left: '20px' },
                         onClick: () => setCurrentIndex(prev => prev > 0 ? prev - 1 : images.length - 1)
                     }, '←'),
-                    React.createElement('img', {
-                        src: currentImage.url || `/uploads/${currentImage.filename}`,
-                        alt: currentImage.filename,
-                        style: imageStyle
-                    }),
+                    isVideo
+                        ? React.createElement('video', {
+                            key: currentImage.url,
+                            ref: videoRef,
+                            src: currentImage.url,
+                            controls: true,
+                            autoPlay: true,
+                            loop: true,
+                            style: imageStyle
+                        })
+                        : React.createElement('img', {
+                            src: currentImage.url || `/uploads/${currentImage.filename}`,
+                            alt: currentImage.filename,
+                            style: imageStyle
+                        }),
                     React.createElement('button', {
                         style: { ...buttonStyle, right: '20px' },
                         onClick: () => setCurrentIndex(prev => prev < images.length - 1 ? prev + 1 : 0)
@@ -171,7 +184,7 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
                             fontWeight: '600',
                             marginBottom: '0.5rem'
                         }
-                    }, 'Image Details'),
+                    }, isVideo ? 'Video Details' : 'Image Details'),
                     React.createElement('div', { style: detailsContainerStyle }, [
                       // Basic Details
                       React.createElement('div', { style: detailItemStyle, key: 'model' },
@@ -190,8 +203,59 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
                                   : 'Not specified'
                           )
                       ),
+                      currentImage.style && React.createElement('div', { style: detailItemStyle, key: 'style' },
+                          React.createElement('span', { style: labelStyle }, 'Style Prompt'),
+                          React.createElement('span', { style: valueStyle }, currentImage.style)
+                      ),
+                      React.createElement(FramePanel, {
+                          key: `frame-panel-${currentImage.url}`,
+                          media: currentImage,
+                          videoRef,
+                          onSent: onClose
+                      }),
+                      // Video inputs section (only if exists)
+                      isVideo && (currentImage.first_frame || currentImage.last_frame || references.length > 0)
+                          && React.createElement('div', {
+                          style: {
+                              ...detailItemStyle,
+                              marginTop: '1rem',
+                              paddingTop: '1rem',
+                              borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+                          },
+                          key: 'video-inputs-section'
+                      }, [
+                          currentImage.first_frame && React.createElement(FrameLineage, {
+                              key: 'first',
+                              label: 'Start Frame',
+                              filename: currentImage.first_frame,
+                              images,
+                              onOpen: setCurrentIndex
+                          }),
+                          currentImage.last_frame && React.createElement(FrameLineage, {
+                              key: 'last',
+                              label: 'End Frame',
+                              filename: currentImage.last_frame,
+                              images,
+                              onOpen: setCurrentIndex
+                          }),
+                          references.map((reference, index) => reference.type === 'image'
+                              ? React.createElement(FrameLineage, {
+                                  key: reference.filename,
+                                  label: `Reference ${index + 1}`,
+                                  filename: reference.filename,
+                                  images,
+                                  onOpen: setCurrentIndex
+                              })
+                              : React.createElement('div', { style: detailItemStyle, key: reference.filename },
+                                  React.createElement('span', { style: labelStyle }, `Reference ${index + 1}`),
+                                  React.createElement('span', { style: valueStyle },
+                                      `${reference.type}: /uploads/${reference.filename}`
+                                  )
+                              )
+                          )
+                      ]),
                       // Image Prompt section (only if exists)
-                      currentImage.source_image && React.createElement('div', {
+                      !isVideo && currentImage.source_image && React.createElement('div', {
                           style: {
                               ...detailItemStyle,
                               marginTop: '1rem',
@@ -220,10 +284,18 @@ const ImagePreviewModal = ({ images, initialIndex, onClose }) => {
                               React.createElement('span', null, currentImage.width || 'N/A'),
                               React.createElement('span', null, 'Image Height:'),
                               React.createElement('span', null, currentImage.height || 'N/A'),
-                              React.createElement('span', null, 'Guidance Scale:'),
-                              React.createElement('span', null, currentImage.settings?.guidanceScale || 'N/A'),
+                              !isVideo && React.createElement('span', null, 'Guidance Scale:'),
+                              !isVideo && React.createElement('span', null, currentImage.settings?.guidanceScale || 'N/A'),
                               React.createElement('span', null, 'Inference Steps:'),
                               React.createElement('span', null, currentImage.settings?.num_inference_steps || 'N/A'),
+                              isVideo && React.createElement('span', null, 'Frames:'),
+                              isVideo && React.createElement('span', null,
+                                  `${currentImage.num_frames} @ ${currentImage.fps} fps`
+                              ),
+                              isVideo && React.createElement('span', null, 'Generation Time:'),
+                              isVideo && React.createElement('span', null, formatDuration(currentImage.elapsed)),
+                              isVideo && currentImage.sweep_id && React.createElement('span', null, 'Sweep:'),
+                              isVideo && currentImage.sweep_id && React.createElement('span', null, currentImage.sweep_id),
                               currentImage.settings?.negativePrompt && [
                                   React.createElement('span', { key: 'neg-label', style: { gridColumn: '1 / -1' } },
                                       'Negative Prompt:'

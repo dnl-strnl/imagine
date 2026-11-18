@@ -1,0 +1,15 @@
+host: 0.0.0.0
+port: 44780
+apis: 1
+
+server:
+  _target_: litserve.LitServer
+  lit_api:
+    _target_: imagine.model.minimax.h3.API
+    model: MiniMaxAI/MiniMax-H3
+    # fl2va: text only, start frame, end frame, or both.
+    workflow: fl2va
+  accelerator: cuda
+  devices: 1
+  # a clip outlasts the default 30 second request timeout.
+  timeout: false

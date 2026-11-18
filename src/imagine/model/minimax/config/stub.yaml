@@ -1,0 +1,16 @@
+host: 0.0.0.0
+port: 44780
+apis: 1
+
+server:
+  _target_: litserve.LitServer
+  lit_api:
+    _target_: imagine.model.minimax.stub.API
+    rate: 0.002
+    overhead: 1.0
+    # folder of mp4s to return instead of a test pattern.
+    clips: null
+  accelerator: cpu
+  devices: 1
+  # a clip outlasts the default 30 second request timeout.
+  timeout: false

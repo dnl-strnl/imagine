@@ -8,6 +8,11 @@ model_port: null
 model_name: null
 model_cert: false
 
+# one video server per workflow; video_host defaults to model_host.
+video_host: null
+video_fl2va_port: 44780
+video_ref2va_port: 44781
+
 datadir: ${hydra:runtime.cwd}/data
 db_file: ${hydra:runtime.cwd}/data/images.db
 outputs: ${hydra:runtime.cwd}/outputs
@@ -18,4 +23,4 @@ default_image_width: 1024
 default_image_height: 1024
 num_inference_steps: 100
 guidance_scale: 5.0
-negative_prompt: dull, incoherent, ai generated, low quality, bad composition, poorly drawn, incorrect anatomy
+negative_prompt: null

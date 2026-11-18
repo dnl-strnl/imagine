@@ -14,11 +14,21 @@ pillow = "^11.1.0"
 omegaconf = "^2.3.0"
 numpy = "^2.2.1"
 requests = "^2.32.3"
-diffusers = "^0.35.1"
+diffusers = ">=0.40.0"
 torch = "^2.8.0"
 accelerate = "^1.10.0"
-transformers = "^4.55.3"
+transformers = ">=4.57.0"
 litserve = "^0.2.15"
+peft = "^0.21.2"
+rich = "*"
+av = "*"
+torchao = {version = "*", markers = "sys_platform == 'linux'"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]

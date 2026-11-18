@@ -2,6 +2,19 @@ import sqlite3
 from pathlib import Path
 import json
 
+VIDEO_COLUMNS = dict(
+    media_type="TEXT DEFAULT 'image'",
+    style='TEXT',
+    num_frames='INTEGER',
+    fps='INTEGER',
+    duration='REAL',
+    elapsed='REAL',
+    sweep_id='INTEGER',
+    first_frame='TEXT',
+    last_frame='TEXT',
+    references_json='TEXT',
+)
+
 class ImageDatabase:
     def __init__(self, db_file):
         self.db_file = db_file
@@ -32,18 +45,24 @@ class ImageDatabase:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+
+            existing = {row[1] for row in conn.execute('PRAGMA table_info(images)')}
+            for column, definition in VIDEO_COLUMNS.items():
+                if column not in existing:
+                    conn.execute(f'ALTER TABLE images ADD COLUMN {column} {definition}')
             conn.commit()
 
     def save_image(self, image_data):
-        """Save image metadata to database."""
+        """Save image or video metadata to database."""
         with sqlite3.connect(self.db_file) as conn:
-            conn.execute('''
+            cursor = conn.execute('''
                 INSERT INTO images (
                     filename, filepath, url, prompt, seed, source_image,
                     model, guidance_scale, num_inference_steps, negative_prompt,
-                    width, height
+                    width, height, media_type, style, num_frames, fps, duration,
+                    elapsed, sweep_id, first_frame, last_frame, references_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 image_data['filename'],
                 image_data['filepath'],
@@ -56,19 +75,42 @@ class ImageDatabase:
                 image_data.get('num_inference_steps'),
                 image_data.get('negative_prompt'),
                 image_data.get('width'),
-                image_data.get('height')
+                image_data.get('height'),
+                image_data.get('media_type', 'image'),
+                image_data.get('style'),
+                image_data.get('num_frames'),
+                image_data.get('fps'),
+                image_data.get('duration'),
+                image_data.get('elapsed'),
+                image_data.get('sweep_id'),
+                image_data.get('first_frame'),
+                image_data.get('last_frame'),
+                json.dumps(image_data.get('references') or [])
             ))
             conn.commit()
+            return cursor.lastrowid
 
-    def get_all_images(self):
-        """Retrieve all images with their metadata."""
+    def get_all_images(self, after_id=None):
+        """Retrieve all images with their metadata, or those newer than an id."""
         with sqlite3.connect(self.db_file) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute('''
                 SELECT * FROM images
-                ORDER BY created_at DESC
-            ''')
+                WHERE id > ?
+                ORDER BY created_at DESC, id DESC
+            ''', (after_id or 0,))
             return [{
+                'id': row['id'],
+                'media_type': row['media_type'] or 'image',
+                'style': row['style'],
+                'num_frames': row['num_frames'],
+                'fps': row['fps'],
+                'duration': row['duration'],
+                'elapsed': row['elapsed'],
+                'sweep_id': row['sweep_id'],
+                'first_frame': row['first_frame'],
+                'last_frame': row['last_frame'],
+                'references': json.loads(row['references_json'] or '[]'),
                 'filename': row['filename'],
                 'filepath': row['filepath'],
                 'url': row['url'],

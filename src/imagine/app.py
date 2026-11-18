@@ -15,7 +15,11 @@ import requests
 import uuid
 from werkzeug.utils import secure_filename
 
+from imagine import sweep
 from imagine.database import ImageDatabase
+from imagine.estimate import Estimator
+from imagine.frames import FrameLibrary
+from imagine.jobs import JobQueue
 
 def make_app(cfg):
     app = Flask(__name__)
@@ -31,9 +35,24 @@ def make_app(cfg):
     default_image_width = cfg.default_image_width
     default_image_height = cfg.default_image_height
 
+    video_host = cfg.video_host or cfg.model_host
+    video_models = dict(
+        fl2va=f'{video_host}:{cfg.video_fl2va_port}/predict' if video_host else None,
+        ref2va=f'{video_host}:{cfg.video_ref2va_port}/predict' if video_host else None,
+    )
+
     @app.route('/model-info', methods=['GET'])
     def get_model_info():
-        return jsonify(dict(model=app.config['MODEL']))
+        return jsonify(dict(
+            model=app.config['MODEL'],
+            video=video_models,
+            video_limits=dict(
+                min_duration=sweep.MIN_DURATION,
+                max_duration=sweep.MAX_DURATION,
+                references=sweep.REFERENCE_LIMITS,
+                max_references=sweep.MAX_REFERENCES,
+            ),
+        ))
 
     @app.route('/')
     def index():
@@ -65,6 +84,7 @@ def make_app(cfg):
             payload = dict(
                 seed=int(data.get('seed', 0)),
                 prompt=prompt,
+                style=data.get('style', ''),
                 negative_prompt=data.get('negative_prompt', ''),
                 width=int(data.get('width', default_image_width)),
                 height=int(data.get('height', default_image_height)),
@@ -127,6 +147,140 @@ def make_app(cfg):
             log.error(error := f'{image_generation_exception=}')
             return jsonify(dict(error=error)), 500
 
+    def encode_upload(filename):
+        upload = app.config['UPLOADS'] / secure_filename(filename)
+        if not upload.exists():
+            raise FileNotFoundError(f'missing upload: {filename}')
+        return base64.b64encode(upload.read_bytes()).decode('utf-8')
+
+    def run_video_job(job):
+        api_payload = dict(
+            workflow=job['workflow'],
+            prompt=job['prompt'],
+            style=job.get('style', ''),
+            seed=job['seed'],
+            width=job['width'],
+            height=job['height'],
+            num_frames=job['num_frames'],
+            fps=job['fps'],
+            num_inference_steps=job['num_inference_steps'],
+            first_frame=encode_upload(job['first_frame']) if job.get('first_frame') else None,
+            last_frame=encode_upload(job['last_frame']) if job.get('last_frame') else None,
+            references=[
+                dict(type=r['type'], filename=r['filename'], data=encode_upload(r['filename']))
+                for r in job.get('references', [])
+            ],
+        )
+
+        started = datetime.now()
+        output = requests.post(job['model'], json=api_payload, verify=cfg.model_cert)
+        result = json.loads(output.content)
+        if 'video' not in result:
+            raise RuntimeError(result.get('detail') or result.get('error') or 'No video data in response.')
+
+        filestem = job['prompt'][:80] + f'_{str(uuid.uuid4())[:8]}'
+        filename = f'{secure_filename(filestem)}.mp4'
+        filepath = app.config['GENERATED'] / filename
+        filepath.write_bytes(base64.b64decode(result['video']))
+
+        video_data = dict(
+            filename=filename,
+            filepath=str(filepath),
+            url=f'/generated/{filename}',
+            media_type='video',
+            elapsed=(datetime.now() - started).total_seconds(),
+            **{k: job.get(k) for k in (
+                'prompt', 'style', 'seed', 'model', 'width', 'height', 'num_frames', 'fps',
+                'duration', 'num_inference_steps', 'sweep_id', 'first_frame', 'last_frame',
+                'references',
+            )}
+        )
+        app.config['DATABASE'].save_image(video_data)
+        return video_data
+
+    estimator = Estimator(cfg.db_file)
+    app.config['QUEUE'] = JobQueue(cfg.db_file, run_video_job, estimator)
+
+    def expand_sweep(spec):
+        spec['workflow'] = spec.get('workflow') or 'fl2va'
+        spec['model'] = spec.get('model') or video_models.get(spec['workflow'])
+        if not spec['model']:
+            raise ValueError('No video model configured: set video_host or model_host.')
+        return sweep.expand(spec)
+
+    @app.route('/sweeps/preview', methods=['POST'])
+    def preview_sweep():
+        try:
+            spec = request.get_json()
+            jobs = expand_sweep(spec)
+            estimate = estimator.estimate(
+                sweep.configurations(jobs), spec['model'], spec['workflow']
+            )
+            return jsonify(dict(success=True, model=spec['model'], **estimate))
+        except (ValueError, KeyError, TypeError) as sweep_exception:
+            return jsonify(dict(error=str(sweep_exception))), 400
+
+    @app.route('/sweeps', methods=['POST'])
+    def submit_sweep():
+        try:
+            spec = request.get_json()
+            jobs = expand_sweep(spec)
+        except (ValueError, KeyError, TypeError) as sweep_exception:
+            return jsonify(dict(error=str(sweep_exception))), 400
+
+        name = spec.get('name') or jobs[0]['prompt'][:60]
+        sweep_id = app.config['QUEUE'].submit(name, spec, jobs)
+        return jsonify(dict(success=True, sweep_id=sweep_id, clips=len(jobs)))
+
+    @app.route('/sweeps', methods=['GET'])
+    def list_sweeps():
+        return jsonify(dict(sweeps=app.config['QUEUE'].sweeps()))
+
+    @app.route('/sweeps/<int:sweep_id>', methods=['GET'])
+    def get_sweep(sweep_id):
+        summary = app.config['QUEUE'].sweep(sweep_id)
+        if summary is None:
+            return jsonify(dict(error='No such sweep.')), 404
+        return jsonify(summary)
+
+    @app.route('/sweeps/<int:sweep_id>/cancel', methods=['POST'])
+    def cancel_sweep(sweep_id):
+        cancelled = app.config['QUEUE'].cancel(sweep_id)
+        return jsonify(dict(success=True, cancelled=cancelled))
+
+    @app.route('/media', methods=['GET'])
+    def new_media():
+        after = request.args.get('after', 0, type=int)
+        return jsonify(dict(media=app.config['DATABASE'].get_all_images(after_id=after)))
+
+    frames = FrameLibrary(cfg.db_file, app.config['UPLOADS'])
+
+    @app.route('/frames', methods=['GET'])
+    def list_frames():
+        return jsonify(dict(frames=frames.all()))
+
+    @app.route('/frames', methods=['POST'])
+    def add_frame():
+        try:
+            if 'file' in request.files:
+                file = request.files['file']
+                frame = frames.add(
+                    file.read(), splitext(file.filename)[1],
+                    parent_id=request.form.get('parent', type=int),
+                )
+            else:
+                data = request.get_json()
+                source = app.config['GENERATED'] / secure_filename(data.get('filename') or '')
+                if not source.is_file():
+                    return jsonify(dict(error='No such generated file.')), 404
+                frame = frames.cut(source, frame=data.get('frame'), time=data.get('time'))
+            return jsonify(dict(success=True, frame=frame))
+        except ValueError as frame_exception:
+            return jsonify(dict(error=str(frame_exception))), 400
+        except Exception as frame_exception:
+            log.error(error := f'{frame_exception=}')
+            return jsonify(dict(error=error)), 500
+
     @app.route('/upload', methods=['POST'])
     def upload_file():
         if 'file' not in request.files:
@@ -147,6 +301,9 @@ def make_app(cfg):
 @hydra.main(version_base=None, config_path='config', config_name='app')
 def main(cfg: DictConfig):
     app = make_app(cfg)
+    # under the debug reloader, only the serving process runs the queue.
+    if not cfg.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        app.config['QUEUE'].start()
     app.run(host=cfg.app_host, port=cfg.app_port, debug=cfg.debug)
 
 if __name__ == '__main__':
